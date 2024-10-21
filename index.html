@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Web Processor</title>
+    <!-- Update the CSS path to be relative -->
+    <link rel="stylesheet" href="./styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.7/axios.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>OCR Web Processor</h1>
+            <p>Extract text from your images instantly</p>
+        </header>
+        
+        <!-- File Upload Section -->
+        <div class="upload-section">
+            <label class="label">Upload Images</label>
+            <div class="file-input-wrapper">
+                <label class="file-input-label" for="imageInput">
+                    <span>Drop files here or click to upload</span>
+                </label>
+                <input 
+                    type="file" 
+                    id="imageInput" 
+                    class="file-input"
+                    multiple 
+                    accept="image/*"
+                >
+            </div>
+        </div>
+
+        <!-- Preview Section -->
+        <div id="imagePreview" class="preview-section"></div>
+
+        <!-- Progress bar -->
+        <div class="progress" style="display: none;">
+            <div class="progress-bar" style="width: 0%"></div>
+        </div>
+
+        <!-- Process Button -->
+        <button 
+            id="processBtn"
+            class="btn btn-primary"
+            disabled
+        >
+            Process Images
+        </button>
+
+        <!-- Results Section -->
+        <div class="results-section">
+            <label class="label">Extracted Text</label>
+            <textarea 
+                id="resultText"
+                class="results-textarea"
+                readonly
+                placeholder="Extracted text will appear here..."
+            ></textarea>
+
+            <!-- Download Button -->
+            <button 
+                id="downloadBtn"
+                class="btn btn-secondary"
+                disabled
+            >
+                Download as TXT
+            </button>
+        </div>
+
+        <!-- Status message -->
+        <div id="statusMessage" class="status-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        const subscriptionKey = '5b4bcbf2dc1c4e5fa0a21b31649344a8';
+        const endpoint = 'https://bookmmea.cognitiveservices.azure.com/';
+        
+        let selectedFiles = [];
+        const imageInput = document.getElementById('imageInput');
+        const imagePreview = document.getElementById('imagePreview');
+        const processBtn = document.getElementById('processBtn');
+        const resultText = document.getElementById('resultText');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const progressBar = document.querySelector('.progress');
+        const progressBarInner = document.querySelector('.progress-bar');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Handle file selection
+        imageInput.addEventListener('change', (e) => {
+            selectedFiles = Array.from(e.target.files);
+            processBtn.disabled = selectedFiles.length === 0;
+            updateImagePreview();
+        });
+
+        // Update image preview
+        function updateImagePreview() {
+            imagePreview.innerHTML = '';
+            selectedFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.className = 'preview-image';
+                    imagePreview.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Show status message
+        function showStatus(message, type = 'success') {
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message status-${type}`;
+            statusMessage.style.display = 'block';
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 5000);
+        }
+
+        // Process images
+        processBtn.addEventListener('click', async () => {
+            processBtn.disabled = true;
+            resultText.value = 'Processing...';
+            progressBar.style.display = 'block';
+            let allText = [];
+
+            try {
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    const file = selectedFiles[i];
+                    const text = await processImage(file);
+                    allText.push(`File: ${file.name}\n${text}\n`);
+                    
+                    // Update progress
+                    const progress = ((i + 1) / selectedFiles.length) * 100;
+                    progressBarInner.style.width = `${progress}%`;
+                }
+                
+                resultText.value = allText.join('\n');
+                downloadBtn.disabled = false;
+                showStatus('Processing completed successfully!');
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                resultText.value = `Error: ${error.message}`;
+            } finally {
+                processBtn.disabled = false;
+                progressBar.style.display = 'none';
+                progressBarInner.style.width = '0%';
+            }
+        });
+
+        // Process single image
+        async function processImage(file) {
+            try {
+                const response = await axios.post(
+                    `${endpoint}vision/v3.1/read/analyze`,
+                    file,
+                    {
+                        headers: {
+                            'Content-Type': file.type,
+                            'Ocp-Apim-Subscription-Key': subscriptionKey
+                        }
+                    }
+                );
+
+                const operationLocation = response.headers['operation-location'];
+
+                while (true) {
+                    const result = await axios.get(
+                        operationLocation,
+                        {
+                            headers: {
+                                'Ocp-Apim-Subscription-Key': subscriptionKey
+                            }
+                        }
+                    );
+
+                    if (result.data.status === 'succeeded') {
+                        return result.data.analyzeResult.readResults
+                            .flatMap(page => page.lines)
+                            .map(line => line.text)
+                            .join('\n');
+                    }
+
+                    if (result.data.status === 'failed') {
+                        throw new Error('OCR processing failed');
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } catch (error) {
+                throw new Error(`Failed to process ${file.name}: ${error.message}`);
+            }
+        }
+
+        // Handle download
+        downloadBtn.addEventListener('click', () => {
+            const blob = new Blob([resultText.value], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ocr-results.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Drag and drop support
+        const dropZone = document.querySelector('.file-input-label');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('file-input-label-dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('file-input-label-dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('file-input-label-dragover');
+            const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+            if (files.length > 0) {
+                imageInput.files = e.dataTransfer.files;
+                selectedFiles = files;
+                processBtn.disabled = false;
+                updateImagePreview();
+            }
+        });
+    </script>
+</body>
+</html>
