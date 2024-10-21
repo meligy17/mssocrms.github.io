@@ -92,9 +92,12 @@
                 handleFile(file);
             });
 
-            dropZone.addEventListener('click', () => {
-                fileInput.click();
+            dropZone.addEventListener('click', (event) => {
+                if (event.target !== fileInput) {
+                    fileInput.click();
+                }
             });
+
 
             async function processImageWithAzure(file) {
                 try {
