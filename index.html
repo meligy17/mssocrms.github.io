@@ -6,7 +6,7 @@
     <title>OCR Web Processor</title>
     <!-- Update the CSS path to be relative -->
     <link rel="stylesheet" href="./styles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.7/axios.min.js"></script>
+<!--     <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.7/axios.min.js"></script> -->
 </head>
 <body>
     <div class="container">
@@ -77,157 +77,171 @@
         const subscriptionKey = '5b4bcbf2dc1c4e5fa0a21b31649344a8';
         const endpoint = 'https://bookmmea.cognitiveservices.azure.com/';
         
-        let selectedFiles = [];
-        const imageInput = document.getElementById('imageInput');
-        const imagePreview = document.getElementById('imagePreview');
-        const processBtn = document.getElementById('processBtn');
-        const resultText = document.getElementById('resultText');
-        const downloadBtn = document.getElementById('downloadBtn');
-        const progressBar = document.querySelector('.progress');
-        const progressBarInner = document.querySelector('.progress-bar');
-        const statusMessage = document.getElementById('statusMessage');
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const imagePreview = document.getElementById('imagePreview');
+            const processButton = document.getElementById('processButton');
+            const results = document.getElementById('results');
+            const progress = document.querySelector('.progress');
+            const progressBar = document.querySelector('.progress-bar');
+            const statusMessage = document.getElementById('statusMessage');
+            const downloadButton = document.getElementById('downloadButton');
 
-        // Handle file selection
-        imageInput.addEventListener('change', (e) => {
-            selectedFiles = Array.from(e.target.files);
-            processBtn.disabled = selectedFiles.length === 0;
-            updateImagePreview();
-        });
+            let currentFile = null;
 
-        // Update image preview
-        function updateImagePreview() {
-            imagePreview.innerHTML = '';
-            selectedFiles.forEach(file => {
+            // Handle file selection
+            function handleFile(file) {
+                if (!file.type.startsWith('image/')) {
+                    showStatus('Please upload an image file.', 'error');
+                    return;
+                }
+
+                currentFile = file;
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = document.createElement('img');
-                    img.src = e.target.result;
-                    img.className = 'preview-image';
-                    imagePreview.appendChild(img);
+                reader.onload = function(e) {
+                    imagePreview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+                    processButton.style.display = 'inline-block';
+                    results.textContent = 'Extracted Text';
+                    downloadButton.style.display = 'none';
                 };
                 reader.readAsDataURL(file);
-            });
-        }
-
-        // Show status message
-        function showStatus(message, type = 'success') {
-            statusMessage.textContent = message;
-            statusMessage.className = `status-message status-${type}`;
-            statusMessage.style.display = 'block';
-            setTimeout(() => {
-                statusMessage.style.display = 'none';
-            }, 5000);
-        }
-
-        // Process images
-        processBtn.addEventListener('click', async () => {
-            processBtn.disabled = true;
-            resultText.value = 'Processing...';
-            progressBar.style.display = 'block';
-            let allText = [];
-
-            try {
-                for (let i = 0; i < selectedFiles.length; i++) {
-                    const file = selectedFiles[i];
-                    const text = await processImage(file);
-                    allText.push(`File: ${file.name}\n${text}\n`);
-                    
-                    // Update progress
-                    const progress = ((i + 1) / selectedFiles.length) * 100;
-                    progressBarInner.style.width = `${progress}%`;
-                }
-                
-                resultText.value = allText.join('\n');
-                downloadBtn.disabled = false;
-                showStatus('Processing completed successfully!');
-            } catch (error) {
-                showStatus(`Error: ${error.message}`, 'error');
-                resultText.value = `Error: ${error.message}`;
-            } finally {
-                processBtn.disabled = false;
-                progressBar.style.display = 'none';
-                progressBarInner.style.width = '0%';
             }
-        });
 
-        // Process single image
-        async function processImage(file) {
-            try {
-                const response = await axios.post(
-                    `${endpoint}vision/v3.1/read/analyze`,
-                    file,
-                    {
-                        headers: {
-                            'Content-Type': file.type,
-                            'Ocp-Apim-Subscription-Key': subscriptionKey
-                        }
-                    }
-                );
+            // File drop handling
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#4CAF50';
+            });
 
-                const operationLocation = response.headers['operation-location'];
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.style.borderColor = '#ccc';
+            });
 
-                while (true) {
-                    const result = await axios.get(
-                        operationLocation,
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#ccc';
+                const file = e.dataTransfer.files[0];
+                handleFile(file);
+            });
+
+            // File input handling
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                handleFile(file);
+            });
+
+            dropZone.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            // Process image using Azure Computer Vision API
+            async function processImageWithAzure(file) {
+                try {
+                    // First API call to submit the image
+                    const readResponse = await fetch(
+                        `${endpoint}/vision/v3.2/read/analyze`,
                         {
+                            method: 'POST',
                             headers: {
+                                'Content-Type': file.type,
                                 'Ocp-Apim-Subscription-Key': subscriptionKey
-                            }
+                            },
+                            body: file
                         }
                     );
 
-                    if (result.data.status === 'succeeded') {
-                        return result.data.analyzeResult.readResults
-                            .flatMap(page => page.lines)
-                            .map(line => line.text)
-                            .join('\n');
+                    if (!readResponse.ok) {
+                        throw new Error(`HTTP error! status: ${readResponse.status}`);
                     }
 
-                    if (result.data.status === 'failed') {
-                        throw new Error('OCR processing failed');
+                    // Get the operation location from headers
+                    const operationLocation = readResponse.headers.get('Operation-Location');
+
+                    // Poll for results
+                    let result;
+                    while (true) {
+                        const resultResponse = await fetch(operationLocation, {
+                            headers: {
+                                'Ocp-Apim-Subscription-Key': subscriptionKey
+                            }
+                        });
+
+                        result = await resultResponse.json();
+
+                        if (result.status === 'succeeded' || result.status === 'failed') {
+                            break;
+                        }
+
+                        // Wait before polling again
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
 
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    if (result.status === 'succeeded') {
+                        // Extract text from the result
+                        let extractedText = '';
+                        result.analyzeResult.readResults.forEach(readResult => {
+                            readResult.lines.forEach(line => {
+                                extractedText += line.text + '\n';
+                            });
+                        });
+
+                        return extractedText.trim();
+                    } else {
+                        throw new Error('Text extraction failed');
+                    }
+                } catch (error) {
+                    throw new Error(`Failed to process image: ${error.message}`);
                 }
-            } catch (error) {
-                throw new Error(`Failed to process ${file.name}: ${error.message}`);
             }
-        }
 
-        // Handle download
-        downloadBtn.addEventListener('click', () => {
-            const blob = new Blob([resultText.value], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'ocr-results.txt';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        });
+            // Process button click handler
+            processButton.addEventListener('click', async () => {
+                if (!currentFile) {
+                    showStatus('Please upload an image first.', 'error');
+                    return;
+                }
 
-        // Drag and drop support
-        const dropZone = document.querySelector('.file-input-label');
+                progress.style.display = 'block';
+                progressBar.style.width = '50%';
+                processButton.disabled = true;
+                results.textContent = 'Processing...';
 
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('file-input-label-dragover');
-        });
+                try {
+                    const extractedText = await processImageWithAzure(currentFile);
+                    results.textContent = extractedText;
+                    downloadButton.style.display = 'inline-block';
+                    showStatus('Text extracted successfully!', 'success');
+                } catch (error) {
+                    showStatus(error.message, 'error');
+                } finally {
+                    progress.style.display = 'none';
+                    processButton.disabled = false;
+                }
+            });
 
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('file-input-label-dragover');
-        });
+            // Download functionality
+            downloadButton.addEventListener('click', () => {
+                const text = results.textContent;
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'extracted_text.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
 
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('file-input-label-dragover');
-            const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-            if (files.length > 0) {
-                imageInput.files = e.dataTransfer.files;
-                selectedFiles = files;
-                processBtn.disabled = false;
-                updateImagePreview();
+            // Status message helper
+            function showStatus(message, type) {
+                statusMessage.textContent = message;
+                statusMessage.className = `status-message ${type}`;
+                statusMessage.style.display = 'block';
+                setTimeout(() => {
+                    statusMessage.style.display = 'none';
+                }, 5000);
             }
         });
     </script>
