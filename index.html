@@ -3,80 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OCR Web Processor</title>
-    <!-- Update the CSS path to be relative -->
-    <link rel="stylesheet" href="./styles.css">
-<!--     <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.7/axios.min.js"></script> -->
+    <title>OCR Web Processor - English & Arabic</title>
+    <link rel="stylesheet" href="style.css"> <!-- Assuming you link to the external CSS file -->
 </head>
 <body>
     <div class="container">
-        <header class="header">
+        <div class="header">
             <h1>OCR Web Processor</h1>
-            <p>Extract text from your images instantly</p>
-        </header>
-        
-        <!-- File Upload Section -->
-        <div class="upload-section">
-            <label class="label">Upload Images</label>
-            <div class="file-input-wrapper">
-                <label class="file-input-label" for="imageInput">
-                    <span>Drop files here or click to upload</span>
-                </label>
-                <input 
-                    type="file" 
-                    id="imageInput" 
-                    class="file-input"
-                    multiple 
-                    accept="image/*"
-                >
-            </div>
+            <p>Extract English and Arabic text from your images instantly</p>
         </div>
 
-        <!-- Preview Section -->
+        <div class="upload-section" id="dropZone">
+            <label class="file-input-label">
+                Drop files here or click to upload
+                <input type="file" id="fileInput" accept="image/*" class="file-input">
+            </label>
+        </div>
+
         <div id="imagePreview" class="preview-section"></div>
 
-        <!-- Progress bar -->
         <div class="progress" style="display: none;">
-            <div class="progress-bar" style="width: 0%"></div>
+            <div class="progress-bar"></div>
         </div>
 
-        <!-- Process Button -->
-        <button 
-            id="processBtn"
-            class="btn btn-primary"
-            disabled
-        >
-            Process Images
-        </button>
+        <button id="processButton" class="btn btn-primary" style="display: none;">Process Image</button>
 
-        <!-- Results Section -->
-        <div class="results-section">
-            <label class="label">Extracted Text</label>
-            <textarea 
-                id="resultText"
-                class="results-textarea"
-                readonly
-                placeholder="Extracted text will appear here..."
-            ></textarea>
-
-            <!-- Download Button -->
-            <button 
-                id="downloadBtn"
-                class="btn btn-secondary"
-                disabled
-            >
-                Download as TXT
-            </button>
+        <div class="results-section" id="results">
+            Extracted Text
         </div>
 
-        <!-- Status message -->
+        <button id="downloadButton" class="btn btn-secondary" style="display: none;">Download as TXT</button>
+
         <div id="statusMessage" class="status-message" style="display: none;"></div>
     </div>
 
     <script>
-        const subscriptionKey = '5b4bcbf2dc1c4e5fa0a21b31649344a8';
-        const endpoint = 'https://bookmmea.cognitiveservices.azure.com/';
-        
+        const subscriptionKey = 'YOUR_AZURE_SUBSCRIPTION_KEY';  // Replace with your Azure key
+        const endpoint = 'YOUR_AZURE_ENDPOINT';  // Replace with your Azure endpoint
+
         document.addEventListener('DOMContentLoaded', function() {
             const dropZone = document.getElementById('dropZone');
             const fileInput = document.getElementById('fileInput');
@@ -90,7 +54,6 @@
 
             let currentFile = null;
 
-            // Handle file selection
             function handleFile(file) {
                 if (!file.type.startsWith('image/')) {
                     showStatus('Please upload an image file.', 'error');
@@ -100,7 +63,7 @@
                 currentFile = file;
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    imagePreview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+                    imagePreview.innerHTML = `<img src="${e.target.result}" alt="Preview" class="preview-image">`;
                     processButton.style.display = 'inline-block';
                     results.textContent = 'Extracted Text';
                     downloadButton.style.display = 'none';
@@ -108,24 +71,22 @@
                 reader.readAsDataURL(file);
             }
 
-            // File drop handling
             dropZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
-                dropZone.style.borderColor = '#4CAF50';
+                dropZone.style.borderColor = 'var(--primary-color)';
             });
 
             dropZone.addEventListener('dragleave', () => {
-                dropZone.style.borderColor = '#ccc';
+                dropZone.style.borderColor = 'var(--border-color)';
             });
 
             dropZone.addEventListener('drop', (e) => {
                 e.preventDefault();
-                dropZone.style.borderColor = '#ccc';
+                dropZone.style.borderColor = 'var(--border-color)';
                 const file = e.dataTransfer.files[0];
                 handleFile(file);
             });
 
-            // File input handling
             fileInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 handleFile(file);
@@ -135,30 +96,21 @@
                 fileInput.click();
             });
 
-            // Process image using Azure Computer Vision API
             async function processImageWithAzure(file) {
                 try {
-                    // First API call to submit the image
-                    const readResponse = await fetch(
-                        `${endpoint}/vision/v3.2/read/analyze`,
-                        {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': file.type,
-                                'Ocp-Apim-Subscription-Key': subscriptionKey
-                            },
-                            body: file
-                        }
-                    );
+                    const readResponse = await fetch(`${endpoint}/vision/v3.2/read/analyze`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': file.type,
+                            'Ocp-Apim-Subscription-Key': subscriptionKey
+                        },
+                        body: file
+                    });
 
-                    if (!readResponse.ok) {
-                        throw new Error(`HTTP error! status: ${readResponse.status}`);
-                    }
+                    if (!readResponse.ok) throw new Error(`HTTP error! status: ${readResponse.status}`);
 
-                    // Get the operation location from headers
                     const operationLocation = readResponse.headers.get('Operation-Location');
 
-                    // Poll for results
                     let result;
                     while (true) {
                         const resultResponse = await fetch(operationLocation, {
@@ -169,16 +121,12 @@
 
                         result = await resultResponse.json();
 
-                        if (result.status === 'succeeded' || result.status === 'failed') {
-                            break;
-                        }
+                        if (result.status === 'succeeded' || result.status === 'failed') break;
 
-                        // Wait before polling again
                         await new Promise(resolve => setTimeout(resolve, 1000));
                     }
 
                     if (result.status === 'succeeded') {
-                        // Extract text from the result
                         let extractedText = '';
                         result.analyzeResult.readResults.forEach(readResult => {
                             readResult.lines.forEach(line => {
@@ -195,7 +143,6 @@
                 }
             }
 
-            // Process button click handler
             processButton.addEventListener('click', async () => {
                 if (!currentFile) {
                     showStatus('Please upload an image first.', 'error');
@@ -220,7 +167,6 @@
                 }
             });
 
-            // Download functionality
             downloadButton.addEventListener('click', () => {
                 const text = results.textContent;
                 const blob = new Blob([text], { type: 'text/plain' });
@@ -234,7 +180,6 @@
                 URL.revokeObjectURL(url);
             });
 
-            // Status message helper
             function showStatus(message, type) {
                 statusMessage.textContent = message;
                 statusMessage.className = `status-message ${type}`;
